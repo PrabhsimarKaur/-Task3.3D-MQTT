@@ -1,40 +1,41 @@
-
-#include <WiFiNINA.h>
-#include <PubSubClient.h>
+#include <WiFiNINA.h>       // Library for WiFi functionality on Arduino Nano 33 IoT
+#include <PubSubClient.h>   // Library for MQTT communication
 
 // -------- WiFi credentials --------
-const char* ssid = "Redmi 12C";         
-const char* password = "kanwalpreet"; 
+const char* ssid = "Redmi 12C";          // Replace with your WiFi SSID
+const char* password = "kanwalpreet";    // Replace with your WiFi password
 
 // -------- MQTT broker details --------
-const char* mqtt_server = "broker.emqx.io";  
-const int mqtt_port = 1883;          
-
-const MyName = "Prabhsimar Kaur"
+const char* mqtt_server = "broker.emqx.io";  // Public MQTT broker
+const int mqtt_port = 1883;                  // Default unencrypted MQTT port
+const char* MyName = "Prabhsimar Kaur";      // Custom message payload
 
 WiFiClient wifiClient;         
-PubSubClient client(wifiClient); // MQTT client using WiFi
+PubSubClient client(wifiClient); // Create MQTT client using WiFi
 
 // -------- Hardware pins --------
 const int trigPin = 3;   // Ultrasonic sensor trigger pin
 const int echoPin = 2;   // Ultrasonic sensor echo pin
-const int ledPin = 10;    // LED pin
+const int ledPin = 10;   // LED output pin
 
 // -------- Measure distance function --------
-// Sends a pulse from ultrasonic sensor and measures the reflected signal
+// Sends a short pulse via ultrasonic sensor trigger pin,
+// measures the echo return time, and converts it to distance (in cm).
 long getDistance() {
   digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(2);           // Ensure clean LOW pulse
   digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
+  delayMicroseconds(10);          // Trigger pulse (10µs)
   digitalWrite(trigPin, LOW);
 
-  long duration = pulseIn(echoPin, HIGH); // measure time pulse took
-  return duration * 0.034 / 2;  // convert to distance in cm
+  long duration = pulseIn(echoPin, HIGH); // Time taken for echo pulse
+  return duration * 0.034 / 2;            // Convert microseconds → centimeters
 }
 
 // -------- LED blink helper function --------
-// Makes it easy to blink LED with custom pattern
+// Provides visual feedback by blinking LED.
+// @param times: number of blinks
+// @param delayMs: delay between ON/OFF in milliseconds
 void blinkLED(int times, int delayMs) {
   for (int i = 0; i < times; i++) {
     digitalWrite(ledPin, HIGH);
@@ -45,11 +46,12 @@ void blinkLED(int times, int delayMs) {
 }
 
 // -------- Callback function --------
-// Called whenever a subscribed MQTT message arrives
+// Triggered whenever a subscribed MQTT message is received.
+// Processes the message and reacts accordingly.
 void callback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
   for (int i = 0; i < length; i++) {
-    msg += (char)payload[i]; // convert payload to string
+    msg += (char)payload[i]; // Convert byte array to string
   }
 
   Serial.print("Message arrived [");
@@ -57,34 +59,36 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("]: ");
   Serial.println(msg);
 
-  // React differently depending on message
+  // React to specific messages
   if (msg == "wave") {
-    blinkLED(3, 300);   // "wave" → blink LED 3 times quickly
+    blinkLED(3, 300);   // Quick triple blink for "wave"
   } else if (msg == "pat") {
-    blinkLED(2, 800);   // "pat" → blink LED 2 times slowly
+    blinkLED(2, 800);   // Slow double blink for "pat"
   }
 }
 
 // -------- Reconnect to broker --------
-// Ensures device always stays connected to MQTT broker
+// Keeps the device connected to the MQTT broker.
+// Attempts reconnection if disconnected.
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    // Connect with client ID
+    // Connect with a unique client ID
     if (client.connect("Nano33IoTClient")) {
       Serial.println("connected");
-      client.subscribe("SIT210/wave"); // Subscribe to topic
+      client.subscribe("SIT210/wave"); // Subscribe to topic for incoming control
     } else {
       Serial.print("failed, rc=");
-      Serial.print(client.state());
-      delay(2000); // wait before retry
+      Serial.print(client.state());    // Print connection error code
+      delay(2000);                     // Wait before retrying
     }
   }
 }
 
 // -------- Setup --------
+// Runs once at startup: initializes pins, connects WiFi, and sets up MQTT.
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); // Serial monitor for debugging
 
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
@@ -96,29 +100,33 @@ void setup() {
   int status = WL_IDLE_STATUS;
   while (status != WL_CONNECTED) {
     status = WiFi.begin(ssid, password);
-    delay(5000);
+    delay(5000); // Retry every 5 seconds
     Serial.print(".");
   }
   Serial.println("\nWiFi connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Setup MQTT
-  client.setServer(mqtt_server, mqtt_port); // point to broker
-  client.setCallback(callback);             // handle incoming messages
+  // Setup MQTT broker connection
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
 }
 
-
+// -------- Main Loop --------
+// Continuously runs: maintains MQTT connection, checks sensor,
+// and publishes messages when a "wave" (hand close to sensor) is detected.
 void loop() {
   // Maintain MQTT connection
   if (!client.connected()) {
     reconnect();
   }
-  client.loop(); // keep listening for messages
+  client.loop(); // Process incoming MQTT messages
 
-  // Detect wave using ultrasonic sensor
+  // Detect gesture using ultrasonic sensor
   long distance = getDistance();
-  if (distance < 20) { // if hand comes closer than 20cm
-    client.publish("SIT210/wave", MyName); 
-    delay(2000); // delay to avoid multiple triggers 
+  if (distance < 20) { // Hand detected within 20 cm
+    client.publish("SIT210/wave", MyName); // Publish event with name
+    delay(2000); // Prevent multiple triggers too close together
+  }
 }
+
